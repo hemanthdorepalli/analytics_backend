@@ -4,6 +4,7 @@ from rest_framework.response import Response
 from rest_framework.permissions import AllowAny, IsAuthenticated
 from rest_framework import status
 from django.conf import settings
+from django.shortcuts import redirect
 from .serializers import RegisterSerializer, LoginSerializer, UserProfileSerializer, ChangePasswordSerializer
 from .services import AuthService
 from core.exceptions import AuthenticationException
@@ -17,11 +18,9 @@ class RegisterView(APIView):
     def post(self, request):
         serializer = RegisterSerializer(data=request.data)
         serializer.is_valid(raise_exception=True)
-
         ip = self._get_ip(request)
         organization_name = serializer.validated_data.get("organization_name", "").strip()
         invite_token = request.data.get("invite_token", "").strip()
-
         user, tokens = AuthService.register(
             email=serializer.validated_data["email"],
             full_name=serializer.validated_data["full_name"],
@@ -29,16 +28,12 @@ class RegisterView(APIView):
             organization_name=organization_name if organization_name and not invite_token else None,
             ip_address=ip,
         )
-
-        # Auto-accept invite if token provided
         if invite_token:
             try:
                 from app.organizations.services import OrganizationService
                 OrganizationService.accept_invite(token=invite_token, user=user)
-                logger.info(f"invite_auto_accepted email={user.email}")
             except Exception as e:
                 logger.warning(f"invite_auto_accept_failed error={e}")
-
         response = Response(
             {"message": "Registration successful.", "user": UserProfileSerializer(user).data},
             status=status.HTTP_201_CREATED,
@@ -125,12 +120,20 @@ class GoogleAuthCallbackView(APIView):
     def get(self, request):
         if request.user.is_authenticated:
             tokens = AuthService._generate_tokens(request.user)
-            response = Response({
-                "message": "Google authentication successful.",
-                "user": UserProfileSerializer(request.user).data,
-            })
-            return AuthService.set_auth_cookies(response, tokens)
-        raise AuthenticationException(message="Google authentication failed.")
+            frontend_url = getattr(settings, "FRONTEND_URL", "http://localhost:3000")
+            # Pass tokens in URL so frontend can store them
+            # This solves cross-domain cookie issue
+            callback_url = (
+                f"{frontend_url}/auth-callback"
+                f"?access={tokens['access']}"
+                f"&refresh={tokens['refresh']}"
+            )
+            response = redirect(callback_url)
+            # Also set cookies as backup
+            AuthService.set_auth_cookies(response, tokens)
+            return response
+        frontend_url = getattr(settings, "FRONTEND_URL", "http://localhost:3000")
+        return redirect(f"{frontend_url}/login?error=google_auth_failed")
 
     @staticmethod
     def _get_ip(request):
