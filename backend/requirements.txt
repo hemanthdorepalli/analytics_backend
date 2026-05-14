@@ -60,4 +60,4 @@ django-extensions==3.2.3
 gunicorn==21.2.0
 
 
-pandas
+dj-database-url==2.1.0

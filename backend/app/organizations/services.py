@@ -14,52 +14,51 @@ from .models import Organization, OrganizationMember, OrganizationInvite
 logger = logging.getLogger(__name__)
 
 
+def send_invite_email(invite):
+    from django.core.mail import send_mail
+    from django.conf import settings
+    try:
+        send_mail(
+            subject=f"You've been invited to join {invite.organization.name}",
+            message=f"""Hi,
+
+You've been invited to join {invite.organization.name} as {invite.role}.
+
+Accept your invite here:
+http://localhost:3000/invite/{invite.token}
+
+This invite expires in 7 days.
+
+Analytics Platform
+""",
+            from_email=settings.DEFAULT_FROM_EMAIL,
+            recipient_list=[invite.email],
+            fail_silently=False,
+        )
+        logger.info(f"invite_email_sent email={invite.email}")
+    except Exception as e:
+        logger.warning(f"invite_email_failed email={invite.email} error={e}")
+
+
 class OrganizationService:
 
     @staticmethod
     def create_with_owner(name: str, owner) -> Organization:
-        """Create organization and assign owner role."""
         slug = OrganizationService._generate_unique_slug(name)
-
         org = Organization.objects.create(name=name, slug=slug)
-
-        OrganizationMember.objects.create(
-            organization=org,
-            user=owner,
-            role=RoleChoices.OWNER,
-        )
-
-        logger.info(
-            "organization_created",
-            org_id=str(org.id),
-            owner_id=str(owner.id),
-        )
-
+        OrganizationMember.objects.create(organization=org, user=owner, role=RoleChoices.OWNER)
+        logger.info(f"organization_created org_id={org.id} owner_id={owner.id}")
         return org
 
     @staticmethod
-    def invite_member(
-        organization: Organization,
-        email: str,
-        role: str,
-        invited_by,
-    ) -> OrganizationInvite:
-        """Send an invite to join the organization."""
-        # Check inviter has permission
+    def invite_member(organization, email, role, invited_by):
         if not RoleChoices.has_permission(
             OrganizationService._get_user_role(invited_by, organization),
             RoleChoices.ADMIN,
         ):
-            raise PermissionDeniedException(
-                message="Only admins and owners can invite members."
-            )
+            raise PermissionDeniedException(message="Only admins and owners can invite members.")
 
-        # Check if already a member
-        if OrganizationMember.objects.filter(
-            organization=organization,
-            user__email=email,
-            is_active=True,
-        ).exists():
+        if OrganizationMember.objects.filter(organization=organization, user__email=email, is_active=True).exists():
             raise OrganizationException(message="User is already a member.")
 
         invite = OrganizationInvite.objects.create(
@@ -69,23 +68,18 @@ class OrganizationService:
             invited_by=invited_by,
             expires_at=timezone.now() + timedelta(days=7),
         )
+        logger.info(f"invite_sent org_id={organization.id} email={email} role={role}")
 
-        logger.info(
-            "invite_sent",
-            org_id=str(organization.id),
-            email=email,
-            role=role,
-        )
+        # Send email notification
+        send_invite_email(invite)
 
         return invite
 
     @staticmethod
-    def accept_invite(token: uuid.UUID, user) -> OrganizationMember:
-        """Accept an organization invite."""
+    def accept_invite(token, user):
         try:
             invite = OrganizationInvite.objects.select_related("organization").get(
-                token=token,
-                status=OrganizationInvite.STATUS_PENDING,
+                token=token, status=OrganizationInvite.STATUS_PENDING,
             )
         except OrganizationInvite.DoesNotExist:
             raise ResourceNotFoundException(message="Invite not found or already used.")
@@ -107,41 +101,27 @@ class OrganizationService:
 
         invite.status = OrganizationInvite.STATUS_ACCEPTED
         invite.save(update_fields=["status"])
-
         return member
 
     @staticmethod
-    def update_member_role(
-        organization: Organization,
-        target_user,
-        new_role: str,
-        updated_by,
-    ) -> OrganizationMember:
-        """Update a member's role. Only owner can assign owner role."""
+    def update_member_role(organization, target_user, new_role, updated_by):
         updater_role = OrganizationService._get_user_role(updated_by, organization)
 
         if new_role == RoleChoices.OWNER and updater_role != RoleChoices.OWNER:
-            raise PermissionDeniedException(
-                message="Only owners can assign the owner role."
-            )
+            raise PermissionDeniedException(message="Only owners can assign the owner role.")
 
         if not RoleChoices.has_permission(updater_role, RoleChoices.ADMIN):
             raise PermissionDeniedException(message="Insufficient permissions.")
 
-        member = OrganizationMember.objects.get(
-            organization=organization, user=target_user, is_active=True
-        )
+        member = OrganizationMember.objects.get(organization=organization, user=target_user, is_active=True)
         member.role = new_role
         member.save(update_fields=["role"])
-
         return member
 
     @staticmethod
-    def _get_user_role(user, organization: Organization) -> str:
+    def _get_user_role(user, organization) -> str:
         try:
-            membership = OrganizationMember.objects.get(
-                user=user, organization=organization, is_active=True
-            )
+            membership = OrganizationMember.objects.get(user=user, organization=organization, is_active=True)
             return membership.role
         except OrganizationMember.DoesNotExist:
             return ""

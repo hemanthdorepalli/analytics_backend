@@ -1,9 +1,7 @@
 import logging
-from typing import Tuple
 from django.contrib.auth import authenticate, get_user_model
 from django.conf import settings
 from rest_framework_simplejwt.tokens import RefreshToken
-from rest_framework.response import Response
 from core.exceptions import AuthenticationException, ValidationException
 
 logger = logging.getLogger(__name__)
@@ -13,7 +11,7 @@ User = get_user_model()
 class AuthService:
 
     @staticmethod
-    def register(email, full_name, password, organization_name, ip_address=None):
+    def register(email, full_name, password, organization_name=None, ip_address=None):
         if User.objects.filter(email=email).exists():
             raise ValidationException(message="A user with this email already exists.")
 
@@ -24,8 +22,10 @@ class AuthService:
             last_login_ip=ip_address,
         )
 
-        from app.organizations.services import OrganizationService
-        OrganizationService.create_with_owner(name=organization_name, owner=user)
+        # Only create org if name provided (skip when user has a pending invite)
+        if organization_name:
+            from app.organizations.services import OrganizationService
+            OrganizationService.create_with_owner(name=organization_name, owner=user)
 
         tokens = AuthService._generate_tokens(user)
         logger.info(f"user_registered email={email}")
@@ -34,31 +34,23 @@ class AuthService:
     @staticmethod
     def login(email, password, ip_address=None):
         user = authenticate(username=email, password=password)
-
         if not user:
             logger.warning(f"login_failed email={email}")
             raise AuthenticationException(message="Invalid email or password.")
-
         if not user.is_active:
             raise AuthenticationException(message="Account is disabled.")
-
         user.last_login_ip = ip_address
         user.save(update_fields=["last_login_ip"])
-
         tokens = AuthService._generate_tokens(user)
         logger.info(f"user_logged_in user_id={user.id}")
         return user, tokens
 
     @staticmethod
     def refresh_token(refresh_token_str):
-        from rest_framework_simplejwt.tokens import RefreshToken
         from rest_framework_simplejwt.exceptions import TokenError
         try:
             refresh = RefreshToken(refresh_token_str)
-            tokens = {
-                "access": str(refresh.access_token),
-                "refresh": str(refresh),
-            }
+            tokens = {"access": str(refresh.access_token), "refresh": str(refresh)}
             refresh.blacklist()
             return tokens
         except TokenError as e:
@@ -66,7 +58,6 @@ class AuthService:
 
     @staticmethod
     def logout(refresh_token_str):
-        from rest_framework_simplejwt.tokens import RefreshToken
         from rest_framework_simplejwt.exceptions import TokenError
         try:
             token = RefreshToken(refresh_token_str)
@@ -78,10 +69,7 @@ class AuthService:
     @staticmethod
     def _generate_tokens(user):
         refresh = RefreshToken.for_user(user)
-        return {
-            "access": str(refresh.access_token),
-            "refresh": str(refresh),
-        }
+        return {"access": str(refresh.access_token), "refresh": str(refresh)}
 
     @staticmethod
     def set_auth_cookies(response, tokens):
@@ -89,22 +77,17 @@ class AuthService:
         secure = jwt_settings.get("AUTH_COOKIE_SECURE", False)
         http_only = jwt_settings.get("AUTH_COOKIE_HTTP_ONLY", True)
         samesite = jwt_settings.get("AUTH_COOKIE_SAMESITE", "Lax")
-
         response.set_cookie(
             key=jwt_settings.get("AUTH_COOKIE", "access_token"),
             value=tokens["access"],
             max_age=int(jwt_settings["ACCESS_TOKEN_LIFETIME"].total_seconds()),
-            secure=secure,
-            httponly=http_only,
-            samesite=samesite,
+            secure=secure, httponly=http_only, samesite=samesite,
         )
         response.set_cookie(
             key=jwt_settings.get("AUTH_COOKIE_REFRESH", "refresh_token"),
             value=tokens["refresh"],
             max_age=int(jwt_settings["REFRESH_TOKEN_LIFETIME"].total_seconds()),
-            secure=secure,
-            httponly=http_only,
-            samesite=samesite,
+            secure=secure, httponly=http_only, samesite=samesite,
         )
         return response
 

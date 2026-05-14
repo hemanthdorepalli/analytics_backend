@@ -10,6 +10,16 @@ from .serializers import (
 )
 from .services import IngestionService, APIKeyService
 from .models import APIKey, Event
+import logging
+
+logger = logging.getLogger(__name__)
+
+
+def get_client_ip(request):
+    x_forwarded_for = request.META.get("HTTP_X_FORWARDED_FOR")
+    if x_forwarded_for:
+        return x_forwarded_for.split(",")[0].strip()
+    return request.META.get("REMOTE_ADDR", "")
 
 
 class SingleEventIngestionView(APIView):
@@ -20,21 +30,20 @@ class SingleEventIngestionView(APIView):
     def post(self, request):
         serializer = SingleEventSerializer(data=request.data)
         serializer.is_valid(raise_exception=True)
-
-        ip = self._get_ip(request)
         event = IngestionService.ingest_single_event(
             organization=request.organization,
             event_data=serializer.validated_data,
-            ip=ip,
+            ip=get_client_ip(request),
         )
-
-        # Queue WebSocket notification
-        from .tasks import notify_dashboard_update
-        notify_dashboard_update.delay(
-            org_id=str(request.organization.id),
-            event_data={"event_name": event.event_name, "timestamp": str(event.timestamp)},
-        )
-
+        # Fire and forget — never crash the request if this fails
+        try:
+            from .tasks import notify_dashboard_update
+            notify_dashboard_update.delay(
+                org_id=str(request.organization.id),
+                event_data={"event_name": event.event_name, "timestamp": str(event.timestamp)},
+            )
+        except Exception as e:
+            logger.warning(f"ws_notify_failed error={e}")
         return Response({"id": str(event.id), "status": "ingested"}, status=status.HTTP_201_CREATED)
 
 
@@ -45,14 +54,11 @@ class BatchEventIngestionView(APIView):
     def post(self, request):
         serializer = BatchEventSerializer(data=request.data)
         serializer.is_valid(raise_exception=True)
-
-        ip = self._get_ip(request)
         count = IngestionService.ingest_batch_events(
             organization=request.organization,
             events_data=serializer.validated_data["events"],
-            ip=ip,
+            ip=get_client_ip(request),
         )
-
         return Response({"status": "ingested", "count": count}, status=status.HTTP_201_CREATED)
 
 
@@ -62,7 +68,6 @@ class CSVUploadView(APIView):
     def post(self, request):
         serializer = CSVUploadSerializer(data=request.data)
         serializer.is_valid(raise_exception=True)
-
         task_id = IngestionService.process_csv_upload(
             organization=request.organization,
             file=serializer.validated_data["file"],
@@ -70,11 +75,7 @@ class CSVUploadView(APIView):
             timestamp_col=serializer.validated_data["timestamp_column"],
             event_name_col=serializer.validated_data["event_name_column"],
         )
-
-        return Response(
-            {"status": "processing", "task_id": task_id},
-            status=status.HTTP_202_ACCEPTED,
-        )
+        return Response({"status": "processing", "task_id": task_id}, status=status.HTTP_202_ACCEPTED)
 
 
 class TaskStatusView(APIView):
@@ -98,20 +99,14 @@ class APIKeyListView(APIView):
     def post(self, request):
         serializer = CreateAPIKeySerializer(data=request.data)
         serializer.is_valid(raise_exception=True)
-
         api_key, raw_key = APIKeyService.generate_key(
             organization=request.organization,
             name=serializer.validated_data["name"],
             created_by=request.user,
             expires_in_days=serializer.validated_data.get("expires_in_days"),
         )
-
         return Response(
-            {
-                **APIKeySerializer(api_key).data,
-                "key": raw_key,
-                "warning": "Save this key now. It will not be shown again.",
-            },
+            {**APIKeySerializer(api_key).data, "key": raw_key, "warning": "Save this key now. It will not be shown again."},
             status=status.HTTP_201_CREATED,
         )
 
@@ -133,10 +128,3 @@ class EventListView(APIView):
         ).order_by("-timestamp")[:100]
         from .serializers import EventSerializer
         return Response(EventSerializer(events, many=True).data)
-
-    @staticmethod
-    def _get_ip(request):
-        x_forwarded_for = request.META.get("HTTP_X_FORWARDED_FOR")
-        if x_forwarded_for:
-            return x_forwarded_for.split(",")[0].strip()
-        return request.META.get("REMOTE_ADDR", "")
