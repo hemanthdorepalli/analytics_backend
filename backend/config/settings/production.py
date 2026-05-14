@@ -14,18 +14,16 @@ SIMPLE_JWT["AUTH_COOKIE_SECURE"] = True
 SIMPLE_JWT["AUTH_COOKIE_SAMESITE"] = "None"
 
 CORS_ALLOWED_ORIGINS = [
-    config("FRONTEND_URL", default="https://analytics-platform.vercel.app"),
+    "https://analytics-frontend-one.vercel.app",
     "http://localhost:3000",
 ]
 CORS_ALLOW_CREDENTIALS = True
-
 SECURE_PROXY_SSL_HEADER = ("HTTP_X_FORWARDED_PROTO", "https")
 
-LOGIN_REDIRECT_URL = config("FRONTEND_URL", default="https://analytics-platform.vercel.app") + "/auth-callback"
-SOCIAL_AUTH_LOGIN_REDIRECT_URL = LOGIN_REDIRECT_URL
-SOCIAL_AUTH_LOGIN_ERROR_URL = config("FRONTEND_URL", default="https://analytics-platform.vercel.app") + "/login"
+LOGIN_REDIRECT_URL = "https://analytics-frontend-one.vercel.app/auth-callback"
+SOCIAL_AUTH_LOGIN_REDIRECT_URL = "https://analytics-frontend-one.vercel.app/auth-callback"
+SOCIAL_AUTH_LOGIN_ERROR_URL = "https://analytics-frontend-one.vercel.app/login"
 
-# Email
 EMAIL_BACKEND = "django.core.mail.backends.smtp.EmailBackend"
 EMAIL_HOST = "smtp.gmail.com"
 EMAIL_PORT = 587
@@ -33,3 +31,25 @@ EMAIL_USE_TLS = True
 EMAIL_HOST_USER = config("EMAIL_HOST_USER", default="")
 EMAIL_HOST_PASSWORD = config("EMAIL_HOST_PASSWORD", default="")
 DEFAULT_FROM_EMAIL = config("DEFAULT_FROM_EMAIL", default="noreply@analytics-platform.com")
+
+import os
+_redis = os.environ.get("REDIS_URL", "")
+if _redis.startswith("rediss://"):
+    CACHES = {
+        "default": {
+            "BACKEND": "django.core.cache.backends.redis.RedisCache",
+            "LOCATION": _redis,
+            "OPTIONS": {"ssl_cert_reqs": None},
+        }
+    }
+    CELERY_BROKER_URL = _redis
+    CELERY_BROKER_USE_SSL = {"ssl_cert_reqs": None}
+    CELERY_REDIS_BACKEND_USE_SSL = {"ssl_cert_reqs": None}
+    CHANNEL_LAYERS = {
+        "default": {
+            "BACKEND": "channels_redis.core.RedisChannelLayer",
+            "CONFIG": {
+                "hosts": [{"address": _redis, "ssl": True}],
+            },
+        }
+    }
