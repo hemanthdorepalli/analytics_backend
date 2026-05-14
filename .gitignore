@@ -1,0 +1,44 @@
+# Environment variables
+.env
+*.env
+
+# Python
+__pycache__/
+*.py[cod]
+*.pyo
+*.pyd
+
+# Virtual environment
+venv/
+env/
+
+# Django
+db.sqlite3
+media/
+staticfiles/
+
+# Logs
+*.log
+
+# Pytest
+.pytest_cache/
+
+# VS Code
+.vscode/
+
+# Mac/Linux
+.DS_Store
+
+# Docker
+*.pid
+
+# Coverage
+htmlcov/
+.coverage
+
+# Node modules (if frontend later)
+node_modules/
+
+# Build files
+dist/
+build/

@@ -1,0 +1,18 @@
+from .base import *
+
+DEBUG = False
+
+ALLOWED_HOSTS = config("ALLOWED_HOSTS", default="").split(",")
+
+CORS_ALLOWED_ORIGINS = config("CORS_ORIGINS", default="").split(",")
+
+CORS_ALLOW_CREDENTIALS = True
+
+# Force HTTPS cookies in production
+SIMPLE_JWT["AUTH_COOKIE_SECURE"] = True
+
+SECURE_SSL_REDIRECT = True
+SECURE_HSTS_SECONDS = 31536000
+SECURE_HSTS_INCLUDE_SUBDOMAINS = True
+SESSION_COOKIE_SECURE = True
+CSRF_COOKIE_SECURE = True

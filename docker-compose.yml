@@ -1,0 +1,51 @@
+services:
+  redis:
+    image: redis:7-alpine
+    ports:
+      - "6379:6379"
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  web:
+      build: ./backend
+      image: analytics_platform:latest
+      command: >
+        sh -c "python manage.py makemigrations authentication organizations ingestion dashboards alerts &&
+               python manage.py migrate authentication &&
+               python manage.py migrate &&
+               daphne -b 0.0.0.0 -p 8000 config.asgi:application"
+      volumes:
+        - ./backend:/app
+      ports:
+        - "8000:8000"
+      env_file: .env
+      depends_on:
+        redis:
+          condition: service_healthy
+
+  celery_worker:
+    image: analytics_platform:latest
+    command: celery -A config.celery worker --loglevel=info --concurrency=4
+    volumes:
+      - ./backend:/app
+    env_file: .env
+    depends_on:
+      web:
+        condition: service_started
+      redis:
+        condition: service_healthy
+
+  celery_beat:
+    image: analytics_platform:latest
+    command: celery -A config.celery beat --loglevel=info --scheduler django_celery_beat.schedulers:DatabaseScheduler
+    volumes:
+      - ./backend:/app
+    env_file: .env
+    depends_on:
+      web:
+        condition: service_started
+      redis:
+        condition: service_healthy
