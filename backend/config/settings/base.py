@@ -256,3 +256,12 @@ EMAIL_USE_TLS = True
 EMAIL_HOST_USER = config("EMAIL_HOST_USER", default="")
 EMAIL_HOST_PASSWORD = config("EMAIL_HOST_PASSWORD", default="")
 DEFAULT_FROM_EMAIL = config("DEFAULT_FROM_EMAIL", default="noreply@analytics-platform.com")
+# Redis SSL support (Upstash)
+import os
+_redis_url = os.environ.get("REDIS_URL", "redis://localhost:6379/0")
+if _redis_url.startswith("rediss://"):
+    CACHES["default"]["LOCATION"] = _redis_url
+    CACHES["default"]["OPTIONS"] = {"ssl_cert_reqs": None}
+    CELERY_BROKER_URL = _redis_url
+    CELERY_BROKER_USE_SSL = {"ssl_cert_reqs": None}
+    CHANNEL_LAYERS["default"]["CONFIG"]["hosts"] = [_redis_url]
