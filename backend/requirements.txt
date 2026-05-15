@@ -37,4 +37,4 @@ python-decouple==3.8
 gunicorn==21.2.0
 
 # Data processing
-pandas==2.2.1
+pandas==2.2.1resend==2.0.0

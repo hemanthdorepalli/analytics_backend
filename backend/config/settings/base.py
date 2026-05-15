@@ -265,3 +265,4 @@ if _redis_url.startswith("rediss://"):
     CELERY_BROKER_URL = _redis_url
     CELERY_BROKER_USE_SSL = {"ssl_cert_reqs": None}
     CHANNEL_LAYERS["default"]["CONFIG"]["hosts"] = [_redis_url]
+RESEND_API_KEY = config('RESEND_API_KEY', default='')

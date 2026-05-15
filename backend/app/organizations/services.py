@@ -1,3 +1,4 @@
+from app.organizations.email import send_invite_email
 import uuid
 import logging
 import threading
@@ -16,7 +17,7 @@ logger = logging.getLogger(__name__)
 
 
 def send_invite_email(invite):
-    from django.core.mail import send_mail
+    
     from django.conf import settings
     try:
         frontend_url = getattr(settings, 'FRONTEND_URL', 'http://localhost:3000')
