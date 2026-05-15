@@ -1,5 +1,6 @@
 import uuid
 import logging
+import threading
 from django.utils import timezone
 from django.utils.text import slugify
 from datetime import timedelta
@@ -15,29 +16,35 @@ logger = logging.getLogger(__name__)
 
 
 def send_invite_email(invite):
-    from django.core.mail import send_mail
-    from django.conf import settings
-    try:
-        send_mail(
-            subject=f"You've been invited to join {invite.organization.name}",
-            message=f"""Hi,
+    """Send invite email in background thread — never blocks request."""
+    def _send():
+        from django.core.mail import send_mail
+        from django.conf import settings
+        try:
+            send_mail(
+                subject=f"You've been invited to join {invite.organization.name}",
+                message=f"""Hi,
 
 You've been invited to join {invite.organization.name} as {invite.role}.
 
 Accept your invite here:
-http://localhost:3000/invite/{invite.token}
+{getattr(settings, 'FRONTEND_URL', 'http://localhost:3000')}/invite/{invite.token}
 
 This invite expires in 7 days.
 
 Analytics Platform
 """,
-            from_email=settings.DEFAULT_FROM_EMAIL,
-            recipient_list=[invite.email],
-            fail_silently=False,
-        )
-        logger.info(f"invite_email_sent email={invite.email}")
-    except Exception as e:
-        logger.warning(f"invite_email_failed email={invite.email} error={e}")
+                from_email=settings.DEFAULT_FROM_EMAIL,
+                recipient_list=[invite.email],
+                fail_silently=True,
+            )
+            logger.info(f"invite_email_sent email={invite.email}")
+        except Exception as e:
+            logger.warning(f"invite_email_failed email={invite.email} error={e}")
+
+    # Run in background thread — request returns immediately
+    thread = threading.Thread(target=_send, daemon=True)
+    thread.start()
 
 
 class OrganizationService:
@@ -58,7 +65,9 @@ class OrganizationService:
         ):
             raise PermissionDeniedException(message="Only admins and owners can invite members.")
 
-        if OrganizationMember.objects.filter(organization=organization, user__email=email, is_active=True).exists():
+        if OrganizationMember.objects.filter(
+            organization=organization, user__email=email, is_active=True
+        ).exists():
             raise OrganizationException(message="User is already a member.")
 
         invite = OrganizationInvite.objects.create(
@@ -70,7 +79,7 @@ class OrganizationService:
         )
         logger.info(f"invite_sent org_id={organization.id} email={email} role={role}")
 
-        # Send email notification
+        # Send email in background — never blocks HTTP request
         send_invite_email(invite)
 
         return invite
@@ -113,7 +122,9 @@ class OrganizationService:
         if not RoleChoices.has_permission(updater_role, RoleChoices.ADMIN):
             raise PermissionDeniedException(message="Insufficient permissions.")
 
-        member = OrganizationMember.objects.get(organization=organization, user=target_user, is_active=True)
+        member = OrganizationMember.objects.get(
+            organization=organization, user=target_user, is_active=True
+        )
         member.role = new_role
         member.save(update_fields=["role"])
         return member
@@ -121,7 +132,9 @@ class OrganizationService:
     @staticmethod
     def _get_user_role(user, organization) -> str:
         try:
-            membership = OrganizationMember.objects.get(user=user, organization=organization, is_active=True)
+            membership = OrganizationMember.objects.get(
+                user=user, organization=organization, is_active=True
+            )
             return membership.role
         except OrganizationMember.DoesNotExist:
             return ""
