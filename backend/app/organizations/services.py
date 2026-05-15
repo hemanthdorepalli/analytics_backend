@@ -36,7 +36,7 @@ Analytics Platform
 """,
                 from_email=settings.DEFAULT_FROM_EMAIL,
                 recipient_list=[invite.email],
-                fail_silently=True,
+                fail_silently=False,
             )
             logger.info(f"invite_email_sent email={invite.email}")
         except Exception as e:
