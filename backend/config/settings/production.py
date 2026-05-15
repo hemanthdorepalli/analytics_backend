@@ -1,5 +1,6 @@
 from .base import *
 from decouple import config
+import os
 
 DEBUG = False
 
@@ -32,7 +33,6 @@ EMAIL_HOST_USER = config("EMAIL_HOST_USER", default="")
 EMAIL_HOST_PASSWORD = config("EMAIL_HOST_PASSWORD", default="")
 DEFAULT_FROM_EMAIL = config("DEFAULT_FROM_EMAIL", default="noreply@analytics-platform.com")
 
-import os
 _redis = os.environ.get("REDIS_URL", "")
 if _redis.startswith("rediss://"):
     CACHES = {
@@ -45,26 +45,24 @@ if _redis.startswith("rediss://"):
     CELERY_BROKER_URL = _redis
     CELERY_BROKER_USE_SSL = {"ssl_cert_reqs": None}
     CELERY_REDIS_BACKEND_USE_SSL = {"ssl_cert_reqs": None}
+    # Fix: use URL directly, channels_redis handles SSL from rediss://
     CHANNEL_LAYERS = {
         "default": {
             "BACKEND": "channels_redis.core.RedisChannelLayer",
             "CONFIG": {
-                "hosts": [{"address": _redis, "ssl": True}],
+                "hosts": [_redis],
             },
         }
     }
 
-# Social auth — don't try to set first_name/last_name (we use full_name)
 SOCIAL_AUTH_USER_FIELDS = ["email", "full_name"]
 SOCIAL_AUTH_GOOGLE_OAUTH2_USER_FIELDS = ["email"]
 
-# Fix AuthStateMissing — use database sessions
 SESSION_ENGINE = "django.contrib.sessions.backends.db"
 SESSION_COOKIE_SECURE = True
 SESSION_COOKIE_SAMESITE = "None"
 SESSION_COOKIE_AGE = 86400
 
-# Social auth pipeline — remove user_details step that sets first_name
 SOCIAL_AUTH_PIPELINE = (
     "social_core.pipeline.social_auth.social_details",
     "social_core.pipeline.social_auth.social_uid",
@@ -76,3 +74,5 @@ SOCIAL_AUTH_PIPELINE = (
     "social_core.pipeline.social_auth.associate_user",
     "social_core.pipeline.social_auth.load_extra_data",
 )
+
+RESEND_API_KEY = config("RESEND_API_KEY", default="")
