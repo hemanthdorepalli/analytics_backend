@@ -1,4 +1,3 @@
-from app.organizations.email import send_invite_email
 import uuid
 import logging
 import threading
@@ -17,13 +16,18 @@ logger = logging.getLogger(__name__)
 
 
 def send_invite_email(invite):
-    
-    from django.conf import settings
-    try:
-        frontend_url = getattr(settings, 'FRONTEND_URL', 'http://localhost:3000')
-        send_mail(
-            subject=f"You've been invited to join {invite.organization.name}",
-            message=f"""Hi,
+    """Send invite email via Resend API in background thread."""
+    def _send():
+        try:
+            import resend
+            from django.conf import settings
+            resend.api_key = settings.RESEND_API_KEY
+            frontend_url = getattr(settings, "FRONTEND_URL", "http://localhost:3000")
+            resend.Emails.send({
+                "from": "Analytics Platform <onboarding@resend.dev>",
+                "to": [invite.email],
+                "subject": f"You've been invited to join {invite.organization.name}",
+                "text": f"""Hi,
 
 You've been invited to join {invite.organization.name} as {invite.role}.
 
@@ -34,13 +38,12 @@ This invite expires in 7 days.
 
 Analytics Platform
 """,
-            from_email=settings.DEFAULT_FROM_EMAIL,
-            recipient_list=[invite.email],
-            fail_silently=False,
-        )
-        logger.info(f"invite_email_sent email={invite.email}")
-    except Exception as e:
-        logger.error(f"invite_email_failed email={invite.email} error={e}")
+            })
+            logger.info(f"invite_email_sent email={invite.email}")
+        except Exception as e:
+            logger.error(f"invite_email_failed email={invite.email} error={e}")
+
+    threading.Thread(target=_send, daemon=True).start()
 
 
 class OrganizationService:
