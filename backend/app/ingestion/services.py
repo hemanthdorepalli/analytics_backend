@@ -2,7 +2,6 @@ import uuid
 import secrets
 import hashlib
 import logging
-from io import StringIO
 from typing import List, Dict
 from django.utils import timezone
 from datetime import timedelta
@@ -101,12 +100,52 @@ class IngestionService:
     @staticmethod
     def process_csv_upload(organization, file, event_type: str, timestamp_col: str, event_name_col: str) -> str:
         content = file.read().decode("utf-8")
-        from .tasks import process_csv_task
-        task = process_csv_task.delay(
-            org_id=str(organization.id),
-            csv_content=content,
-            event_type=event_type,
-            timestamp_col=timestamp_col,
-            event_name_col=event_name_col,
-        )
-        return task.id
+
+        # Try Celery async first, fall back to sync processing
+        try:
+            from .tasks import process_csv_task
+            task = process_csv_task.delay(
+                org_id=str(organization.id),
+                csv_content=content,
+                event_type=event_type,
+                timestamp_col=timestamp_col,
+                event_name_col=event_name_col,
+            )
+            return task.id
+        except Exception as e:
+            logger.warning(f"celery_unavailable_processing_sync error={e}")
+            # Process synchronously as fallback
+            return IngestionService._process_csv_sync(
+                organization=organization,
+                csv_content=content,
+                event_type=event_type,
+                timestamp_col=timestamp_col,
+                event_name_col=event_name_col,
+            )
+
+    @staticmethod
+    def _process_csv_sync(organization, csv_content: str, event_type: str, timestamp_col: str, event_name_col: str) -> str:
+        import pandas as pd
+        from io import StringIO
+
+        df = pd.read_csv(StringIO(csv_content))
+        df[timestamp_col] = pd.to_datetime(df[timestamp_col], utc=True)
+
+        events = []
+        for _, row in df.iterrows():
+            event_name = str(row.get(event_name_col, event_type))
+            properties = row.drop(labels=[timestamp_col, event_name_col], errors="ignore").to_dict()
+            events.append(Event(
+                organization=organization,
+                event_type=event_type,
+                event_name=event_name,
+                source=Event.EVENT_TYPE_CSV,
+                properties={k: str(v) for k, v in properties.items()},
+                timestamp=row[timestamp_col],
+            ))
+
+        for i in range(0, len(events), 500):
+            Event.objects.bulk_create(events[i:i+500])
+
+        logger.info(f"csv_processed_sync org_id={organization.id} count={len(events)}")
+        return f"sync-{str(uuid.uuid4())}"
