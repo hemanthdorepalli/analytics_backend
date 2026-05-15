@@ -16,35 +16,30 @@ logger = logging.getLogger(__name__)
 
 
 def send_invite_email(invite):
-    """Send invite email in background thread — never blocks request."""
-    def _send():
-        from django.core.mail import send_mail
-        from django.conf import settings
-        try:
-            send_mail(
-                subject=f"You've been invited to join {invite.organization.name}",
-                message=f"""Hi,
+    from django.core.mail import send_mail
+    from django.conf import settings
+    try:
+        frontend_url = getattr(settings, 'FRONTEND_URL', 'http://localhost:3000')
+        send_mail(
+            subject=f"You've been invited to join {invite.organization.name}",
+            message=f"""Hi,
 
 You've been invited to join {invite.organization.name} as {invite.role}.
 
 Accept your invite here:
-{getattr(settings, 'FRONTEND_URL', 'http://localhost:3000')}/invite/{invite.token}
+{frontend_url}/invite/{invite.token}
 
 This invite expires in 7 days.
 
 Analytics Platform
 """,
-                from_email=settings.DEFAULT_FROM_EMAIL,
-                recipient_list=[invite.email],
-                fail_silently=False,
-            )
-            logger.info(f"invite_email_sent email={invite.email}")
-        except Exception as e:
-            logger.warning(f"invite_email_failed email={invite.email} error={e}")
-
-    # Run in background thread — request returns immediately
-    thread = threading.Thread(target=_send, daemon=True)
-    thread.start()
+            from_email=settings.DEFAULT_FROM_EMAIL,
+            recipient_list=[invite.email],
+            fail_silently=False,
+        )
+        logger.info(f"invite_email_sent email={invite.email}")
+    except Exception as e:
+        logger.error(f"invite_email_failed email={invite.email} error={e}")
 
 
 class OrganizationService:
@@ -78,10 +73,7 @@ class OrganizationService:
             expires_at=timezone.now() + timedelta(days=7),
         )
         logger.info(f"invite_sent org_id={organization.id} email={email} role={role}")
-
-        # Send email in background — never blocks HTTP request
         send_invite_email(invite)
-
         return invite
 
     @staticmethod
@@ -115,13 +107,10 @@ class OrganizationService:
     @staticmethod
     def update_member_role(organization, target_user, new_role, updated_by):
         updater_role = OrganizationService._get_user_role(updated_by, organization)
-
         if new_role == RoleChoices.OWNER and updater_role != RoleChoices.OWNER:
             raise PermissionDeniedException(message="Only owners can assign the owner role.")
-
         if not RoleChoices.has_permission(updater_role, RoleChoices.ADMIN):
             raise PermissionDeniedException(message="Insufficient permissions.")
-
         member = OrganizationMember.objects.get(
             organization=organization, user=target_user, is_active=True
         )
